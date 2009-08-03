@@ -7,67 +7,57 @@
 #include <alsa/asoundlib.h>
 #include <alsa/pcm_external.h>
 
+#if 1
+#include <stdio.h>
+#define prn(x...) do { fprintf(stderr,x); } while(0)
+#else
+#define prn do {} while(0)
+#endif
+#define ppp prn("<<<%s/%d>>>\n", __FUNCTION__, __LINE__);
+
+#define ARRAY_SIZE(ary)	(sizeof(ary)/sizeof(ary[0]))
+
+#define NONE_CHANNELS_MAX	32U
+#define NONE_RATE_MAX		(48000U*4U)
+
 typedef struct {
 	snd_pcm_ioplug_t io;
 	int state;
 	int poll_fd;
+	size_t last_size;
+	size_t ptr;
+	size_t offset;
+	size_t frame_size;
+	size_t buffer_attr_tlength;
 } snd_pcm_none_t;
 
-static int none_close(snd_pcm_ioplug_t *pcm)
-{
-	snd_pcm_none_t *none = pcm->private_data;
-	close(none->poll_fd);
-	free(none);
-	return 0;
-}
-
-static int none_delay(snd_pcm_ioplug_t *pcm ATTRIBUTE_UNUSED, snd_pcm_sframes_t *delayp)
-{
-	*delayp = 0;
-	return 0;
-}
-
-static int none_prepare(snd_pcm_ioplug_t *pcm)
-{
-	snd_pcm_none_t *none = pcm->private_data;
-	none->state = SND_PCM_STATE_PREPARED;
-	return 0;
-}
-
-static int none_start(snd_pcm_ioplug_t *pcm)
-{
-	snd_pcm_none_t *none = pcm->private_data;
-	none->state = SND_PCM_STATE_RUNNING;
-	return 0;
-}
-
-static int none_hw_params(snd_pcm_ioplug_t *pcm ATTRIBUTE_UNUSED, snd_pcm_hw_params_t * params ATTRIBUTE_UNUSED)
-{
-	return 0;
-}
+#define LATENCY_BYTES 512
 
 static snd_pcm_sframes_t none_pointer(snd_pcm_ioplug_t * io)
 {
-	return 0;
+	snd_pcm_none_t *pcm = io->private_data;
+	snd_pcm_sframes_t ret = 0;
+	assert(pcm);
+	if (io->state != SND_PCM_STATE_RUNNING) {
+		prn("pointer: not running\n");
+		return 0;
+	}
+	ret = snd_pcm_bytes_to_frames(io->pcm, pcm->ptr);
+	prn("pointer: ptr=%d ret=%d\n", pcm->ptr, (int)ret);
+	return ret;
 }
 
-static int none_stop(snd_pcm_ioplug_t * io)
+static snd_pcm_sframes_t none_write(snd_pcm_ioplug_t * io,
+				     const snd_pcm_channel_area_t * areas,
+				     snd_pcm_uframes_t offset,
+				     snd_pcm_uframes_t size)
 {
-	return 0;
-}
-
-static int none_pcm_poll_revents(snd_pcm_ioplug_t * io,
-				  struct pollfd *pfd, unsigned int nfds,
-				  unsigned short *revents)
-{
-	int err = 0;
 	snd_pcm_none_t *pcm = io->private_data;
 	assert(pcm);
-	if (err)
-		*revents = io->stream == SND_PCM_STREAM_PLAYBACK ? POLLOUT : POLLIN;
-	else
-		*revents = 0;
-	return err;
+	size_t frame_size = pcm->frame_size;
+	pcm->ptr += size * frame_size;
+	prn("write: size=%d ptr=%d framesize=%d\n", (int)size, pcm->ptr, frame_size);
+	return size;
 }
 
 static snd_pcm_sframes_t none_read(snd_pcm_ioplug_t * io,
@@ -77,13 +67,108 @@ static snd_pcm_sframes_t none_read(snd_pcm_ioplug_t * io,
 {
 	snd_pcm_none_t *pcm = io->private_data;
 	assert(pcm);
-	void *dst_buf = (char *) areas->addr + (areas->first + areas->step * offset) / 8;
-	memset(dst_buf, 0, size);
-	return size;
+	snd_pcm_sframes_t ret;
+	size_t remain_size, frag_length;
+	size_t frame_size = pcm->frame_size;
+	remain_size = size * frame_size;
+	frag_length = 0;
+	if (frag_length > remain_size) {
+		pcm->offset += remain_size;
+		frag_length = remain_size;
+	} else {
+		pcm->offset = 0;
+	}
+	remain_size -= frag_length;
+	ret = size - remain_size / frame_size;
+	return ret;
 }
 
+static int none_pcm_poll_revents(snd_pcm_ioplug_t * io,
+				  struct pollfd *pfd, unsigned int nfds,
+				  unsigned short *revents)
+{
+	snd_pcm_none_t *pcm = io->private_data;
+	assert(pcm);
+	if (io->stream == SND_PCM_STREAM_PLAYBACK) {
+		*revents = 0; //POLLOUT;
+	} else {
+		*revents = 0; //POLLIN;
+	}
+	return 0;
+}
 
-static const snd_pcm_ioplug_callback_t none_callback = {
+static int none_start(snd_pcm_ioplug_t * io)
+{
+	return 0;
+}
+
+static int none_stop(snd_pcm_ioplug_t * io)
+{
+	return 0;
+}
+
+static int none_drain(snd_pcm_ioplug_t * io)
+{
+	return 0;
+}
+
+static int none_prepare(snd_pcm_ioplug_t * io)
+{
+	snd_pcm_none_t *pcm = io->private_data;
+	assert(pcm);
+	pcm->offset = 0;
+	return 0;
+}
+
+static int none_delay(snd_pcm_ioplug_t * io, snd_pcm_sframes_t * delayp)
+{
+	snd_pcm_none_t *pcm = io->private_data;
+	assert(pcm);
+	*delayp = snd_pcm_bytes_to_frames(io->pcm, LATENCY_BYTES);
+	return 0;
+}
+
+static int none_hw_params(snd_pcm_ioplug_t *io, snd_pcm_hw_params_t * params)
+{
+	snd_pcm_none_t *pcm = io->private_data;
+	assert(pcm);
+	pcm->frame_size = (snd_pcm_format_physical_width(io->format) * io->channels) / 8;
+	switch (io->format) {
+	case SND_PCM_FORMAT_U8:
+	case SND_PCM_FORMAT_A_LAW:
+	case SND_PCM_FORMAT_MU_LAW:
+	case SND_PCM_FORMAT_S16_LE:
+	case SND_PCM_FORMAT_S16_BE:
+		break;
+	default:
+		SNDERR("None: Unsupported format %s\n", snd_pcm_format_name(io->format));
+		return -EINVAL;
+	}
+	return 0;
+}
+
+static int none_close(snd_pcm_ioplug_t * io)
+{
+	snd_pcm_none_t *pcm = io->private_data;
+	assert(pcm);
+	free(pcm);
+	return 0;
+}
+
+static const snd_pcm_ioplug_callback_t none_playback_callback = {
+	.start = none_start,
+	.stop = none_stop,
+	.drain = none_drain,
+	.pointer = none_pointer,
+	.transfer = none_write,
+	.delay = none_delay,
+	.poll_revents = none_pcm_poll_revents,
+	.prepare = none_prepare,
+	.hw_params = none_hw_params,
+	.close = none_close,
+};
+
+static const snd_pcm_ioplug_callback_t none_capture_callback = {
 	.start = none_start,
 	.stop = none_stop,
 	.pointer = none_pointer,
@@ -95,16 +180,71 @@ static const snd_pcm_ioplug_callback_t none_callback = {
 	.close = none_close,
 };
 
-/*
-None plugin discards contents of a PCM stream or creates a stream with zero
-samples.
+static int none_hw_constraint(snd_pcm_none_t * pcm)
+{
+	snd_pcm_ioplug_t *io = &pcm->io;
 
-Note: This implementation uses device /dev/null (playback and capture)
+	static const snd_pcm_access_t access_list[] = {
+		SND_PCM_ACCESS_RW_INTERLEAVED
+	};
+	static const unsigned int formats[] = {
+		SND_PCM_FORMAT_U8,
+		SND_PCM_FORMAT_A_LAW,
+		SND_PCM_FORMAT_MU_LAW,
+		SND_PCM_FORMAT_S16_LE,
+		SND_PCM_FORMAT_S16_BE,
+		SND_PCM_FORMAT_FLOAT_LE,
+		SND_PCM_FORMAT_FLOAT_BE,
+		SND_PCM_FORMAT_S32_LE,
+		SND_PCM_FORMAT_S32_BE
+	};
 
-pcm.name {
-        type none               # Null PCM
+	int err;
+
+	err = snd_pcm_ioplug_set_param_list(io, SND_PCM_IOPLUG_HW_ACCESS,
+					    ARRAY_SIZE(access_list),
+					    access_list);
+	if (err < 0)
+		return err;
+
+	err = snd_pcm_ioplug_set_param_list(io, SND_PCM_IOPLUG_HW_FORMAT,
+					    ARRAY_SIZE(formats), formats);
+	if (err < 0)
+		return err;
+
+	err =
+	    snd_pcm_ioplug_set_param_minmax(io, SND_PCM_IOPLUG_HW_CHANNELS,
+					    1, NONE_CHANNELS_MAX);
+	if (err < 0)
+		return err;
+
+	err = snd_pcm_ioplug_set_param_minmax(io, SND_PCM_IOPLUG_HW_RATE,
+					      1, NONE_RATE_MAX);
+	if (err < 0)
+		return err;
+
+	err =
+	    snd_pcm_ioplug_set_param_minmax(io,
+					    SND_PCM_IOPLUG_HW_BUFFER_BYTES,
+					    1, 4 * 1024 * 1024);
+	if (err < 0)
+		return err;
+
+	err =
+	    snd_pcm_ioplug_set_param_minmax(io,
+					    SND_PCM_IOPLUG_HW_PERIOD_BYTES,
+					    128, 2 * 1024 * 1024);
+	if (err < 0)
+		return err;
+
+	err =
+	    snd_pcm_ioplug_set_param_minmax(io, SND_PCM_IOPLUG_HW_PERIODS,
+					    3, 1024);
+	if (err < 0)
+		return err;
+
+	return 0;
 }
-*/
 
 SND_PCM_PLUGIN_DEFINE_FUNC(none)
 {
@@ -117,8 +257,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(none)
 		const char *id;
 		if (snd_config_get_id(n, &id) < 0)
 			continue;
-		if (strcmp(id, "comment") == 0 || strcmp(id, "type") == 0
-		    || strcmp(id, "hint") == 0)
+		if (strcmp(id, "comment") == 0 || strcmp(id, "type") == 0 || strcmp(id, "hint") == 0)
 			continue;
 		SNDERR("Unknown field %s", id);
 		return -EINVAL;
@@ -135,6 +274,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(none)
 		close(poll_fd);
 		return -ENOMEM;
 	}
+
 	pcm->poll_fd = poll_fd;
 	pcm->state = SND_PCM_STATE_OPEN;
 
@@ -144,10 +284,18 @@ SND_PCM_PLUGIN_DEFINE_FUNC(none)
 	pcm->io.poll_events = stream == SND_PCM_STREAM_PLAYBACK ? POLLOUT : POLLIN;
 	pcm->io.mmap_rw = 0;
 	pcm->io.private_data = pcm;
+	pcm->io.callback = stream == SND_PCM_STREAM_PLAYBACK ?
+			&none_playback_callback : &none_capture_callback;
 
 	err = snd_pcm_ioplug_create(&pcm->io, name, stream, mode);
 	if (err < 0)
 		goto error;
+
+	err = none_hw_constraint(pcm);
+	if (err < 0) {
+		snd_pcm_ioplug_delete(&pcm->io);
+		goto error;
+	}
 
 	*pcmp = pcm->io.pcm;
 	return 0;
@@ -157,5 +305,5 @@ error:
 	return err;
 }
 
-SND_PCM_PLUGIN_SYMBOL(pulse);
+SND_PCM_PLUGIN_SYMBOL(none);
 
