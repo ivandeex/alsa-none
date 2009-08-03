@@ -3,17 +3,47 @@
 #include <byteswap.h>
 #include <limits.h>
 #include <sys/shm.h>
+#include <stdio.h>
+#include <stdarg.h>
+#include <string.h>
+#include <sys/time.h>
 
 #include <alsa/asoundlib.h>
 #include <alsa/pcm_external.h>
 
-#if 1
-#include <stdio.h>
-#define prn(x...) do { fprintf(stderr,x); } while(0)
+#define DEBUG 0
+
+#if DEBUG
+
+#define prn(x...) _prn(x)
+
+static int debug = 1;
+
+static int _prn (const char *fmt, ...)
+{
+	char buf[256];
+	va_list ap;
+	struct timeval tv;
+	if (!debug)
+		return 0;
+	gettimeofday(&tv, NULL);
+	sprintf(buf, "%02d.%03d.%03d ",
+		(int)(tv.tv_sec % 60), (int)(tv.tv_usec / 1000), (int)(tv.tv_usec % 1000));
+	va_start(ap, fmt);
+	vsprintf(buf + strlen(buf), fmt, ap);
+	va_end(ap);
+	strcat(buf, "\n");
+	write(2, buf, strlen(buf));
+	return 0;
+}
+
 #else
-#define prn do {} while(0)
-#endif
-#define ppp prn("<<<%s/%d>>>\n", __FUNCTION__, __LINE__);
+
+#define prn(x...)
+
+#endif /* DEBUG */
+
+#define ppp prn("<<<%s/%d>>>", __FUNCTION__, __LINE__);
 
 #define ARRAY_SIZE(ary)	(sizeof(ary)/sizeof(ary[0]))
 
@@ -23,27 +53,39 @@
 typedef struct {
 	snd_pcm_ioplug_t io;
 	int state;
-	int poll_fd;
+	int poll_fd, trig_fd;
 	size_t last_size;
 	size_t ptr;
+	size_t ptr_add;
 	size_t offset;
 	size_t frame_size;
 	size_t buffer_attr_tlength;
 } snd_pcm_none_t;
 
 #define LATENCY_BYTES 512
+#define MAX_ADD 1024
 
 static snd_pcm_sframes_t none_pointer(snd_pcm_ioplug_t * io)
 {
 	snd_pcm_none_t *pcm = io->private_data;
 	snd_pcm_sframes_t ret = 0;
 	assert(pcm);
+#if 0
 	if (io->state != SND_PCM_STATE_RUNNING) {
-		prn("pointer: not running\n");
+		prn("pointer: not running");
 		return 0;
 	}
+#endif
+	int add = pcm->ptr_add;
+	if (add > MAX_ADD) {
+		add = MAX_ADD;
+	} else {
+		add = pcm->ptr_add;
+	}
+	pcm->ptr += add;
+	pcm->ptr_add -= add;
+	prn("pointer: %s ptr=%d add=%d ret=%d", io->stream == SND_PCM_STREAM_PLAYBACK ? "playback" : "capture", pcm->ptr, pcm->ptr_add, (int)ret);
 	ret = snd_pcm_bytes_to_frames(io->pcm, pcm->ptr);
-	prn("pointer: ptr=%d ret=%d\n", pcm->ptr, (int)ret);
 	return ret;
 }
 
@@ -54,9 +96,15 @@ static snd_pcm_sframes_t none_write(snd_pcm_ioplug_t * io,
 {
 	snd_pcm_none_t *pcm = io->private_data;
 	assert(pcm);
+#if 0
+	if (io->state != SND_PCM_STATE_RUNNING) {
+		prn("write: not running");
+		return 0;
+	}
+#endif
 	size_t frame_size = pcm->frame_size;
-	pcm->ptr += size * frame_size;
-	prn("write: size=%d ptr=%d framesize=%d\n", (int)size, pcm->ptr, frame_size);
+	pcm->ptr_add += size * frame_size;
+	prn("write: %s size=%d ptr=%d framesize=%d", io->stream == SND_PCM_STREAM_PLAYBACK ? "playback" : "capture", (int)size, pcm->ptr, frame_size);
 	return size;
 }
 
@@ -67,6 +115,12 @@ static snd_pcm_sframes_t none_read(snd_pcm_ioplug_t * io,
 {
 	snd_pcm_none_t *pcm = io->private_data;
 	assert(pcm);
+#if 0
+	if (io->state != SND_PCM_STATE_RUNNING) {
+		prn("read: not running");
+		return 0;
+	}
+#endif
 	snd_pcm_sframes_t ret;
 	size_t remain_size, frag_length;
 	size_t frame_size = pcm->frame_size;
@@ -80,6 +134,7 @@ static snd_pcm_sframes_t none_read(snd_pcm_ioplug_t * io,
 	}
 	remain_size -= frag_length;
 	ret = size - remain_size / frame_size;
+	prn("read: %s size=%d ret=%d", io->stream == SND_PCM_STREAM_PLAYBACK ? "playback" : "capture", (int)size, (int)ret);
 	return ret;
 }
 
@@ -90,9 +145,11 @@ static int none_pcm_poll_revents(snd_pcm_ioplug_t * io,
 	snd_pcm_none_t *pcm = io->private_data;
 	assert(pcm);
 	if (io->stream == SND_PCM_STREAM_PLAYBACK) {
-		*revents = 0; //POLLOUT;
+		*revents = pcm->ptr_add ? 0 : POLLOUT;
+		prn("pollout: %x", (int)*revents);
 	} else {
 		*revents = 0; //POLLIN;
+		prn("pollin");
 	}
 	return 0;
 }
@@ -151,6 +208,8 @@ static int none_close(snd_pcm_ioplug_t * io)
 {
 	snd_pcm_none_t *pcm = io->private_data;
 	assert(pcm);
+	close(pcm->poll_fd);
+	close(pcm->trig_fd);
 	free(pcm);
 	return 0;
 }
@@ -249,7 +308,7 @@ static int none_hw_constraint(snd_pcm_none_t * pcm)
 SND_PCM_PLUGIN_DEFINE_FUNC(none)
 {
 	snd_config_iterator_t i, next;
-	int err, poll_fd;
+	int err, fds[2];
 	snd_pcm_none_t *pcm;
 
 	snd_config_for_each(i, next, conf) {
@@ -263,24 +322,25 @@ SND_PCM_PLUGIN_DEFINE_FUNC(none)
 		return -EINVAL;
 	}
 
-	poll_fd = open("/dev/null", O_WRONLY);
-	if (poll_fd < 0) {
-		SYSERR("Cannot open /dev/null");
+	if (pipe(fds) < 0) {
+		SYSERR("Cannot create pipe");
 		return -errno;
 	}
 
 	pcm = calloc(1, sizeof(snd_pcm_none_t));
 	if (!pcm) {
-		close(poll_fd);
+		close(fds[0]);
+		close(fds[1]);
 		return -ENOMEM;
 	}
 
-	pcm->poll_fd = poll_fd;
+	pcm->poll_fd = fds[0];
+	pcm->trig_fd = fds[1];
 	pcm->state = SND_PCM_STATE_OPEN;
 
 	pcm->io.version = SND_PCM_IOPLUG_VERSION;
 	pcm->io.name = "ALSA <-> NONE PCM I/O Plugin";
-	pcm->io.poll_fd = poll_fd;
+	pcm->io.poll_fd = pcm->poll_fd;
 	pcm->io.poll_events = stream == SND_PCM_STREAM_PLAYBACK ? POLLOUT : POLLIN;
 	pcm->io.mmap_rw = 0;
 	pcm->io.private_data = pcm;
