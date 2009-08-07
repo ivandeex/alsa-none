@@ -1,35 +1,56 @@
 /*-*- linux-c -*-*/
 
-#include <byteswap.h>
-#include <limits.h>
-#include <sys/shm.h>
-
-#include <alsa/asoundlib.h>
-#include <alsa/pcm_external.h>
-
-#define DEBUG 0
-
-#if DEBUG
+#include <stdio.h>
+#include <math.h>
 
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
 #include <sys/time.h>
 
-#define prn(x...) _prn(x)
+#include <alsa/asoundlib.h>
+#include <alsa/pcm_external.h>
 
-static int debug = 1;
+#define ARRAY_SIZE(ary)	(sizeof(ary)/sizeof(ary[0]))
 
-static int _prn (const char *fmt, ...)
+#define NONE_CHANNELS_MAX	1
+#define NONE_RATE_MIN		4000
+#define NONE_RATE_MAX		48000
+#define NONE_MAX_BUFFER_BYTES	(256 * 1024)
+#define NONE_MAX_PERIOD_BYTES	(32 * 1024)
+#define NONE_MAX_PERIODS	1024
+
+#define NONE_RATE_MULTIPLIER	1.
+
+typedef struct {
+	snd_pcm_ioplug_t io;
+	int id;
+	int playback;
+	int running;
+	int poll_fd;
+	int other_fd;
+	size_t usr_ptr;
+	size_t adv_ptr;
+	size_t frame_size;
+	size_t rate;
+	struct timespec adv_time_0;
+	size_t adv_ptr_0;
+	int reset_stream;
+} none_t;
+
+static int enable_debug = 0;
+
+static int debug (const none_t *pcm, const char *fmt, ...)
 {
 	char buf[256];
 	va_list ap;
 	struct timeval tv;
-	if (!debug)
+	if (!enable_debug)
 		return 0;
 	gettimeofday(&tv, NULL);
-	sprintf(buf, "%02d.%03d.%03d ",
-		(int)(tv.tv_sec % 60), (int)(tv.tv_usec / 1000), (int)(tv.tv_usec % 1000));
+	sprintf(buf, "%02d.%03d.%03d %d%c ",
+		(int)(tv.tv_sec % 60), (int)(tv.tv_usec / 1000), (int)(tv.tv_usec % 1000),
+		pcm ? pcm->id : 0, pcm ? (pcm->playback ? 'P' : 'C') : 'X');
 	va_start(ap, fmt);
 	vsprintf(buf + strlen(buf), fmt, ap);
 	va_end(ap);
@@ -38,159 +59,161 @@ static int _prn (const char *fmt, ...)
 	return 0;
 }
 
-#else
-
-#define prn(x...)
-
-#endif /* DEBUG */
-
-#define ppp prn("<<<%s/%d>>>", __FUNCTION__, __LINE__);
-
-#define ARRAY_SIZE(ary)	(sizeof(ary)/sizeof(ary[0]))
-
-#define NONE_CHANNELS_MAX	32U
-#define NONE_RATE_MAX		(48000U*4U)
-
-typedef struct {
-	snd_pcm_ioplug_t io;
-	int state;
-	int poll_fd, trig_fd;
-	size_t last_size;
-	size_t ptr;
-	size_t ptr_add;
-	size_t offset;
-	size_t frame_size;
-	size_t buffer_attr_tlength;
-} snd_pcm_none_t;
-
-#define LATENCY_BYTES 512
-#define MAX_ADD 1024
+static int none_advance(none_t *pcm)
+{
+	struct timespec now;
+	double sec;
+	size_t adv_ptr;
+	if (!pcm->running)
+		return -1;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	if (pcm->reset_stream) {
+		pcm->adv_time_0 = now;
+		pcm->adv_ptr_0 = pcm->adv_ptr;
+		pcm->reset_stream = 0;
+	}
+	sec = (now.tv_sec - pcm->adv_time_0.tv_sec) * 1.
+		+ (now.tv_nsec - pcm->adv_time_0.tv_nsec) * 1e-9;
+	adv_ptr = (size_t)(pcm->adv_ptr_0 + sec * pcm->rate * NONE_RATE_MULTIPLIER);
+	debug(pcm, "advance: %u to %u   (hw:%u ap:%u)",
+		pcm->adv_ptr, adv_ptr, pcm->io.hw_ptr, pcm->io.appl_ptr);
+	if (adv_ptr > pcm->adv_ptr)
+		pcm->adv_ptr = adv_ptr;
+	return 0;
+}
 
 static snd_pcm_sframes_t none_pointer(snd_pcm_ioplug_t * io)
 {
-	snd_pcm_none_t *pcm = io->private_data;
-	snd_pcm_sframes_t ret = 0;
+	none_t *pcm = io->private_data;
 	assert(pcm);
-#if 0
-	if (io->state != SND_PCM_STATE_RUNNING) {
-		prn("pointer: not running");
+	if (!pcm->running) {
+		debug(pcm, "pointer: not running");
 		return 0;
 	}
-#endif
-	int add = pcm->ptr_add;
-	if (add > MAX_ADD) {
-		add = MAX_ADD;
-	} else {
-		add = pcm->ptr_add;
-	}
-	pcm->ptr += add;
-	pcm->ptr_add -= add;
-	prn("pointer: %s ptr=%d add=%d ret=%d", io->stream == SND_PCM_STREAM_PLAYBACK ? "playback" : "capture", pcm->ptr, pcm->ptr_add, (int)ret);
-	ret = snd_pcm_bytes_to_frames(io->pcm, pcm->ptr);
-	return ret;
+	debug(pcm, "pointer: %u", pcm->adv_ptr);
+	return pcm->adv_ptr;
 }
 
-static snd_pcm_sframes_t none_write(snd_pcm_ioplug_t * io,
+static snd_pcm_sframes_t none_transfer(snd_pcm_ioplug_t * io,
 				     const snd_pcm_channel_area_t * areas,
 				     snd_pcm_uframes_t offset,
 				     snd_pcm_uframes_t size)
 {
-	snd_pcm_none_t *pcm = io->private_data;
+	struct timespec req, rem;
+	double sec;
+	long delta;
+	none_t *pcm = io->private_data;
 	assert(pcm);
-#if 0
-	if (io->state != SND_PCM_STATE_RUNNING) {
-		prn("write: not running");
+	if (!pcm->running) {
+		debug(pcm, "transfer: not running");
 		return 0;
 	}
-#endif
-	size_t frame_size = pcm->frame_size;
-	pcm->ptr_add += size * frame_size;
-	prn("write: %s size=%d ptr=%d framesize=%d", io->stream == SND_PCM_STREAM_PLAYBACK ? "playback" : "capture", (int)size, pcm->ptr, frame_size);
+	debug(pcm, "transfer: offset:%u size: %u", offset, size);
+	for (;;) {
+		none_advance(pcm);
+		delta = pcm->usr_ptr + size - pcm->adv_ptr;
+		debug(pcm, "transfer: remaining:%ld", -delta);
+		if (delta <= 0)
+			break;
+		sec = (double)delta / (pcm->rate * NONE_RATE_MULTIPLIER);
+		if (sec < 1e-6)
+			break;
+		debug(pcm, "transfer: sleep %d ms", (int)(sec * 1e3));
+		req.tv_sec = (time_t) sec;
+		req.tv_nsec = (long)((sec - floor(sec)) * 1e9);
+		if (req.tv_nsec > 1000000000L) {
+			req.tv_sec += 1;
+			req.tv_nsec -= 1000000000L;
+		}
+		nanosleep(&req, &rem);
+	}
+	debug(pcm, "transfer: return:%ld", (long)size);
+	pcm->usr_ptr += size;
 	return size;
-}
-
-static snd_pcm_sframes_t none_read(snd_pcm_ioplug_t * io,
-				    const snd_pcm_channel_area_t * areas,
-				    snd_pcm_uframes_t offset,
-				    snd_pcm_uframes_t size)
-{
-	snd_pcm_none_t *pcm = io->private_data;
-	assert(pcm);
-#if 0
-	if (io->state != SND_PCM_STATE_RUNNING) {
-		prn("read: not running");
-		return 0;
-	}
-#endif
-	snd_pcm_sframes_t ret;
-	size_t remain_size, frag_length;
-	size_t frame_size = pcm->frame_size;
-	remain_size = size * frame_size;
-	frag_length = 0;
-	if (frag_length > remain_size) {
-		pcm->offset += remain_size;
-		frag_length = remain_size;
-	} else {
-		pcm->offset = 0;
-	}
-	remain_size -= frag_length;
-	ret = size - remain_size / frame_size;
-	prn("read: %s size=%d ret=%d", io->stream == SND_PCM_STREAM_PLAYBACK ? "playback" : "capture", (int)size, (int)ret);
-	return ret;
 }
 
 static int none_pcm_poll_revents(snd_pcm_ioplug_t * io,
 				  struct pollfd *pfd, unsigned int nfds,
 				  unsigned short *revents)
 {
-	snd_pcm_none_t *pcm = io->private_data;
+	none_t *pcm = io->private_data;
 	assert(pcm);
-	if (io->stream == SND_PCM_STREAM_PLAYBACK) {
-		*revents = pcm->ptr_add ? 0 : POLLOUT;
-		prn("pollout: %x", (int)*revents);
-	} else {
-		*revents = 0; //POLLIN;
-		prn("pollin");
+	if (!pcm->running) {
+		debug(pcm, "poll: not running");
+		return 0;
 	}
+	none_advance(pcm);
+	if ((long)(pcm->adv_ptr - pcm->usr_ptr) > 0)
+		*revents = pcm->playback ? POLLOUT : POLLIN;
+	else
+		*revents = 0;
+	debug(pcm, "poll: %08x", (unsigned) *revents);
 	return 0;
 }
 
 static int none_start(snd_pcm_ioplug_t * io)
 {
+	none_t *pcm = io->private_data;
+	assert(pcm);
+	if (pcm->running) {
+		debug(pcm, "start: already started");
+		return 0;
+	}
+	debug(pcm, "start");
+	pcm->running = 1;
+	pcm->reset_stream = 1;
+	none_advance(pcm);
 	return 0;
 }
 
 static int none_stop(snd_pcm_ioplug_t * io)
 {
+	none_t *pcm = io->private_data;
+	assert(pcm);
+	debug(pcm, "stop");
+	pcm->running = 0;
 	return 0;
 }
 
 static int none_drain(snd_pcm_ioplug_t * io)
 {
+	none_t *pcm = io->private_data;
+	assert(pcm);
+	debug(pcm, "drain");
+	pcm->running = 0;
 	return 0;
 }
 
 static int none_prepare(snd_pcm_ioplug_t * io)
 {
-	snd_pcm_none_t *pcm = io->private_data;
+	none_t *pcm = io->private_data;
 	assert(pcm);
-	pcm->offset = 0;
+	debug(pcm, "prepare");
+	pcm->adv_ptr = pcm->usr_ptr = 0;
+	none_start(io);
 	return 0;
 }
 
 static int none_delay(snd_pcm_ioplug_t * io, snd_pcm_sframes_t * delayp)
 {
-	snd_pcm_none_t *pcm = io->private_data;
+	none_t *pcm = io->private_data;
 	assert(pcm);
-	*delayp = snd_pcm_bytes_to_frames(io->pcm, LATENCY_BYTES);
+	debug(pcm, "delay");
+	*delayp = 1;
 	return 0;
 }
 
 static int none_hw_params(snd_pcm_ioplug_t *io, snd_pcm_hw_params_t * params)
 {
-	snd_pcm_none_t *pcm = io->private_data;
+	none_t *pcm = io->private_data;
 	assert(pcm);
 	pcm->frame_size = (snd_pcm_format_physical_width(io->format) * io->channels) / 8;
+	pcm->rate = io->rate;
+	if ((int)pcm->frame_size < 1) {
+		debug(pcm, "params: invalid frame size %d", (int)pcm->frame_size);
+		pcm->frame_size = 1;
+		return -EINVAL;
+	}
 	switch (io->format) {
 	case SND_PCM_FORMAT_U8:
 	case SND_PCM_FORMAT_A_LAW:
@@ -199,28 +222,33 @@ static int none_hw_params(snd_pcm_ioplug_t *io, snd_pcm_hw_params_t * params)
 	case SND_PCM_FORMAT_S16_BE:
 		break;
 	default:
-		SNDERR("None: Unsupported format %s\n", snd_pcm_format_name(io->format));
+		debug(pcm, "params: invalid format %d", io->format);
 		return -EINVAL;
 	}
+	debug(pcm, "params: frame_sz:%d rate:%u format:%d channels:%u period_sz:%u bufsize:%u",
+		pcm->frame_size, pcm->rate, io->format, io->channels,
+		io->period_size, io->buffer_size);
+
 	return 0;
 }
 
 static int none_close(snd_pcm_ioplug_t * io)
 {
-	snd_pcm_none_t *pcm = io->private_data;
+	none_t *pcm = io->private_data;
 	assert(pcm);
+	debug(pcm, "pcm: close");
 	close(pcm->poll_fd);
-	close(pcm->trig_fd);
+	close(pcm->other_fd);
 	free(pcm);
 	return 0;
 }
 
-static const snd_pcm_ioplug_callback_t none_playback_callback = {
+static const snd_pcm_ioplug_callback_t none_callbacks = {
 	.start = none_start,
 	.stop = none_stop,
 	.drain = none_drain,
 	.pointer = none_pointer,
-	.transfer = none_write,
+	.transfer = none_transfer,
 	.delay = none_delay,
 	.poll_revents = none_pcm_poll_revents,
 	.prepare = none_prepare,
@@ -228,38 +256,20 @@ static const snd_pcm_ioplug_callback_t none_playback_callback = {
 	.close = none_close,
 };
 
-static const snd_pcm_ioplug_callback_t none_capture_callback = {
-	.start = none_start,
-	.stop = none_stop,
-	.pointer = none_pointer,
-	.transfer = none_read,
-	.delay = none_delay,
-	.poll_revents = none_pcm_poll_revents,
-	.prepare = none_prepare,
-	.hw_params = none_hw_params,
-	.close = none_close,
-};
-
-static int none_hw_constraint(snd_pcm_none_t * pcm)
+static int none_hw_constraint(none_t * pcm)
 {
 	snd_pcm_ioplug_t *io = &pcm->io;
+	int err;
 
 	static const snd_pcm_access_t access_list[] = {
 		SND_PCM_ACCESS_RW_INTERLEAVED
 	};
+
 	static const unsigned int formats[] = {
 		SND_PCM_FORMAT_U8,
-		SND_PCM_FORMAT_A_LAW,
-		SND_PCM_FORMAT_MU_LAW,
 		SND_PCM_FORMAT_S16_LE,
 		SND_PCM_FORMAT_S16_BE,
-		SND_PCM_FORMAT_FLOAT_LE,
-		SND_PCM_FORMAT_FLOAT_BE,
-		SND_PCM_FORMAT_S32_LE,
-		SND_PCM_FORMAT_S32_BE
 	};
-
-	int err;
 
 	err = snd_pcm_ioplug_set_param_list(io, SND_PCM_IOPLUG_HW_ACCESS,
 					    ARRAY_SIZE(access_list),
@@ -268,101 +278,113 @@ static int none_hw_constraint(snd_pcm_none_t * pcm)
 		return err;
 
 	err = snd_pcm_ioplug_set_param_list(io, SND_PCM_IOPLUG_HW_FORMAT,
-					    ARRAY_SIZE(formats), formats);
+						ARRAY_SIZE(formats), formats);
 	if (err < 0)
 		return err;
 
-	err =
-	    snd_pcm_ioplug_set_param_minmax(io, SND_PCM_IOPLUG_HW_CHANNELS,
-					    1, NONE_CHANNELS_MAX);
+	err = snd_pcm_ioplug_set_param_minmax(io, SND_PCM_IOPLUG_HW_CHANNELS,
+						1, NONE_CHANNELS_MAX);
 	if (err < 0)
 		return err;
 
 	err = snd_pcm_ioplug_set_param_minmax(io, SND_PCM_IOPLUG_HW_RATE,
-					      1, NONE_RATE_MAX);
+						NONE_RATE_MIN, NONE_RATE_MAX);
 	if (err < 0)
 		return err;
 
-	err =
-	    snd_pcm_ioplug_set_param_minmax(io,
-					    SND_PCM_IOPLUG_HW_BUFFER_BYTES,
-					    1, 4 * 1024 * 1024);
+	err = snd_pcm_ioplug_set_param_minmax(io, SND_PCM_IOPLUG_HW_BUFFER_BYTES,
+						1, NONE_MAX_BUFFER_BYTES);
 	if (err < 0)
 		return err;
 
-	err =
-	    snd_pcm_ioplug_set_param_minmax(io,
-					    SND_PCM_IOPLUG_HW_PERIOD_BYTES,
-					    128, 2 * 1024 * 1024);
+	err = snd_pcm_ioplug_set_param_minmax(io, SND_PCM_IOPLUG_HW_PERIOD_BYTES,
+						128, NONE_MAX_PERIOD_BYTES);
 	if (err < 0)
 		return err;
 
-	err =
-	    snd_pcm_ioplug_set_param_minmax(io, SND_PCM_IOPLUG_HW_PERIODS,
-					    3, 1024);
+	err = snd_pcm_ioplug_set_param_minmax(io, SND_PCM_IOPLUG_HW_PERIODS, 3, NONE_MAX_PERIODS);
 	if (err < 0)
 		return err;
 
+	debug(pcm, "pcm: constraint");
 	return 0;
 }
 
 SND_PCM_PLUGIN_DEFINE_FUNC(none)
 {
+	static int none_id;
 	snd_config_iterator_t i, next;
 	int err, fds[2];
-	snd_pcm_none_t *pcm;
+	long value;
+	none_t *pcm;
 
 	snd_config_for_each(i, next, conf) {
 		snd_config_t *n = snd_config_iterator_entry(i);
 		const char *id;
 		if (snd_config_get_id(n, &id) < 0)
 			continue;
-		if (strcmp(id, "comment") == 0 || strcmp(id, "type") == 0 || strcmp(id, "hint") == 0)
+		if (strcmp(id, "debug") == 0) {
+			err = snd_config_get_integer(n, &value);
+			if (err >= 0) {
+				enable_debug = !!value;
+				continue;
+			}
+		} else if (!strcmp(id, "comment") || !strcmp(id, "type") || !strcmp(id, "hint")) {
 			continue;
-		SNDERR("Unknown field %s", id);
+		}
+		fprintf(stderr, "open: invalid id \"%s\"", id);
 		return -EINVAL;
 	}
 
-	if (pipe(fds) < 0) {
-		SYSERR("Cannot create pipe");
-		return -errno;
-	}
-
-	pcm = calloc(1, sizeof(snd_pcm_none_t));
-	if (!pcm) {
-		close(fds[0]);
-		close(fds[1]);
+	if (NULL == (pcm = calloc(1, sizeof(none_t))))
 		return -ENOMEM;
-	}
 
-	pcm->poll_fd = fds[0];
-	pcm->trig_fd = fds[1];
-	pcm->state = SND_PCM_STATE_OPEN;
+	pcm->id = ++ none_id;
+	pcm->running = 0;
+	pcm->playback = stream == SND_PCM_STREAM_PLAYBACK;
+
+	if (pipe(fds) < 0) {
+		free(pcm);
+		return -EIO;
+	}
+	pcm->poll_fd = fds[pcm->playback];
+	pcm->other_fd = fds[1 - pcm->playback];
+
+	pcm->reset_stream = 1;
+	pcm->frame_size = 2;
+	pcm->rate = 48000;
+	pcm->adv_ptr = pcm->usr_ptr = 0;
 
 	pcm->io.version = SND_PCM_IOPLUG_VERSION;
-	pcm->io.name = "ALSA <-> NONE PCM I/O Plugin";
+	pcm->io.name = "ALSA <-> NoNe PCM I/O Plugin";
 	pcm->io.poll_fd = pcm->poll_fd;
-	pcm->io.poll_events = stream == SND_PCM_STREAM_PLAYBACK ? POLLOUT : POLLIN;
+	pcm->io.poll_events = pcm->playback ? POLLOUT : POLLIN;
 	pcm->io.mmap_rw = 0;
 	pcm->io.private_data = pcm;
-	pcm->io.callback = stream == SND_PCM_STREAM_PLAYBACK ?
-			&none_playback_callback : &none_capture_callback;
+	pcm->io.callback = &none_callbacks;
 
 	err = snd_pcm_ioplug_create(&pcm->io, name, stream, mode);
-	if (err < 0)
+	if (err < 0) {
+		debug(pcm, "ioplug_create failed");
 		goto error;
+	}
 
 	err = none_hw_constraint(pcm);
 	if (err < 0) {
 		snd_pcm_ioplug_delete(&pcm->io);
+		debug(pcm, "hw_contraint failed error:%d", err);
 		goto error;
 	}
 
 	*pcmp = pcm->io.pcm;
+	debug(pcm, "pcm: open");
 	return 0;
 
 error:
+	close(fds[0]);
+	close(fds[1]);
 	free(pcm);
+	debug(0, "open failed error:%d", err);
 	return err;
 }
 

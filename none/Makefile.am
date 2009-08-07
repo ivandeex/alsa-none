@@ -13,7 +13,7 @@ libasound_module_ctl_none_la_SOURCES = ctl_none.c none.h
 libasound_module_ctl_none_la_LIBADD = @ALSA_LIBS@ $(PTHREAD_LIBS) $(none_LIBS)
 
 libasound_module_pcm_none_la_SOURCES = pcm_none.c none.h
-libasound_module_pcm_none_la_LIBADD = @ALSA_LIBS@ $(PTHREAD_LIBS) $(none_LIBS)
+libasound_module_pcm_none_la_LIBADD = @ALSA_LIBS@ $(PTHREAD_LIBS) $(none_LIBS) -lrt -lm
 
 libasound_module_conf_none_la_SOURCES = conf_none.c none.h
 libasound_module_conf_none_la_LIBADD = @ALSA_LIBS@ $(PTHREAD_LIBS) $(none_LIBS)
