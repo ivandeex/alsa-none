@@ -3,10 +3,6 @@
 #include <byteswap.h>
 #include <limits.h>
 #include <sys/shm.h>
-#include <stdio.h>
-#include <stdarg.h>
-#include <string.h>
-#include <sys/time.h>
 
 #include <alsa/asoundlib.h>
 #include <alsa/pcm_external.h>
@@ -14,6 +10,11 @@
 #define DEBUG 0
 
 #if DEBUG
+
+#include <stdio.h>
+#include <stdarg.h>
+#include <string.h>
+#include <sys/time.h>
 
 #define prn(x...) _prn(x)
 
