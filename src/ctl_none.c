@@ -20,12 +20,9 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
-#include <sys/poll.h>
-
 #include <alsa/asoundlib.h>
 #include <alsa/control_external.h>
 
-#include "none.h"
 
 typedef struct snd_ctl_none {
 	snd_ctl_ext_t ext;

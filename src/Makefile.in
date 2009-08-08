@@ -34,7 +34,7 @@ PRE_UNINSTALL = :
 POST_UNINSTALL = :
 build_triplet = @build@
 host_triplet = @host@
-subdir = none
+subdir = src
 DIST_COMMON = $(srcdir)/Makefile.am $(srcdir)/Makefile.in
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/m4/attributes.m4 \
@@ -69,16 +69,10 @@ am__nobase_list = $(am__nobase_strip_setup); \
 am__base_list = \
   sed '$$!N;$$!N;$$!N;$$!N;$$!N;$$!N;$$!N;s/\n/ /g' | \
   sed '$$!N;$$!N;$$!N;$$!N;s/\n/ /g'
-am__installdirs = "$(DESTDIR)$(asound_module_confdir)" \
-	"$(DESTDIR)$(asound_module_ctldir)" \
+am__installdirs = "$(DESTDIR)$(asound_module_ctldir)" \
 	"$(DESTDIR)$(asound_module_pcmdir)"
-LTLIBRARIES = $(asound_module_conf_LTLIBRARIES) \
-	$(asound_module_ctl_LTLIBRARIES) \
+LTLIBRARIES = $(asound_module_ctl_LTLIBRARIES) \
 	$(asound_module_pcm_LTLIBRARIES)
-libasound_module_conf_none_la_DEPENDENCIES =
-am_libasound_module_conf_none_la_OBJECTS = conf_none.lo
-libasound_module_conf_none_la_OBJECTS =  \
-	$(am_libasound_module_conf_none_la_OBJECTS)
 libasound_module_ctl_none_la_DEPENDENCIES =
 am_libasound_module_ctl_none_la_OBJECTS = ctl_none.lo
 libasound_module_ctl_none_la_OBJECTS =  \
@@ -100,11 +94,9 @@ CCLD = $(CC)
 LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) \
 	--mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) \
 	$(LDFLAGS) -o $@
-SOURCES = $(libasound_module_conf_none_la_SOURCES) \
-	$(libasound_module_ctl_none_la_SOURCES) \
+SOURCES = $(libasound_module_ctl_none_la_SOURCES) \
 	$(libasound_module_pcm_none_la_SOURCES)
-DIST_SOURCES = $(libasound_module_conf_none_la_SOURCES) \
-	$(libasound_module_ctl_none_la_SOURCES) \
+DIST_SOURCES = $(libasound_module_ctl_none_la_SOURCES) \
 	$(libasound_module_pcm_none_la_SOURCES)
 ETAGS = etags
 CTAGS = ctags
@@ -226,18 +218,14 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 asound_module_pcm_LTLIBRARIES = libasound_module_pcm_none.la
 asound_module_ctl_LTLIBRARIES = libasound_module_ctl_none.la
-asound_module_conf_LTLIBRARIES = libasound_module_conf_none.la
 asound_module_pcmdir = @ALSA_PLUGIN_DIR@
 asound_module_ctldir = @ALSA_PLUGIN_DIR@
-asound_module_confdir = @ALSA_PLUGIN_DIR@
 AM_CFLAGS = -Wall -g @ALSA_CFLAGS@ $(PTHREAD_CFLAGS) $(none_CFLAGS) -D_GNU_SOURCE
 AM_LDFLAGS = -module -avoid-version -export-dynamic -no-undefined $(LDFLAGS_NOUNDEFINED)
-libasound_module_ctl_none_la_SOURCES = ctl_none.c none.h
+libasound_module_ctl_none_la_SOURCES = ctl_none.c
 libasound_module_ctl_none_la_LIBADD = @ALSA_LIBS@ $(PTHREAD_LIBS) $(none_LIBS)
-libasound_module_pcm_none_la_SOURCES = pcm_none.c none.h
+libasound_module_pcm_none_la_SOURCES = pcm_none.c
 libasound_module_pcm_none_la_LIBADD = @ALSA_LIBS@ $(PTHREAD_LIBS) $(none_LIBS) -lrt -lm
-libasound_module_conf_none_la_SOURCES = conf_none.c none.h
-libasound_module_conf_none_la_LIBADD = @ALSA_LIBS@ $(PTHREAD_LIBS) $(none_LIBS)
 all: all-am
 
 .SUFFIXES:
@@ -251,9 +239,9 @@ $(srcdir)/Makefile.in:  $(srcdir)/Makefile.am  $(am__configure_deps)
 	      exit 1;; \
 	  esac; \
 	done; \
-	echo ' cd $(top_srcdir) && $(AUTOMAKE) --gnu none/Makefile'; \
+	echo ' cd $(top_srcdir) && $(AUTOMAKE) --foreign src/Makefile'; \
 	$(am__cd) $(top_srcdir) && \
-	  $(AUTOMAKE) --gnu none/Makefile
+	  $(AUTOMAKE) --foreign src/Makefile
 .PRECIOUS: Makefile
 Makefile: $(srcdir)/Makefile.in $(top_builddir)/config.status
 	@case '$?' in \
@@ -272,37 +260,6 @@ $(top_srcdir)/configure:  $(am__configure_deps)
 $(ACLOCAL_M4):  $(am__aclocal_m4_deps)
 	cd $(top_builddir) && $(MAKE) $(AM_MAKEFLAGS) am--refresh
 $(am__aclocal_m4_deps):
-install-asound_module_confLTLIBRARIES: $(asound_module_conf_LTLIBRARIES)
-	@$(NORMAL_INSTALL)
-	test -z "$(asound_module_confdir)" || $(MKDIR_P) "$(DESTDIR)$(asound_module_confdir)"
-	@list='$(asound_module_conf_LTLIBRARIES)'; test -n "$(asound_module_confdir)" || list=; \
-	list2=; for p in $$list; do \
-	  if test -f $$p; then \
-	    list2="$$list2 $$p"; \
-	  else :; fi; \
-	done; \
-	test -z "$$list2" || { \
-	  echo " $(LIBTOOL) $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=install $(INSTALL) $(INSTALL_STRIP_FLAG) $$list2 '$(DESTDIR)$(asound_module_confdir)'"; \
-	  $(LIBTOOL) $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=install $(INSTALL) $(INSTALL_STRIP_FLAG) $$list2 "$(DESTDIR)$(asound_module_confdir)"; \
-	}
-
-uninstall-asound_module_confLTLIBRARIES:
-	@$(NORMAL_UNINSTALL)
-	@list='$(asound_module_conf_LTLIBRARIES)'; test -n "$(asound_module_confdir)" || list=; \
-	for p in $$list; do \
-	  $(am__strip_dir) \
-	  echo " $(LIBTOOL) $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=uninstall rm -f '$(DESTDIR)$(asound_module_confdir)/$$f'"; \
-	  $(LIBTOOL) $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=uninstall rm -f "$(DESTDIR)$(asound_module_confdir)/$$f"; \
-	done
-
-clean-asound_module_confLTLIBRARIES:
-	-test -z "$(asound_module_conf_LTLIBRARIES)" || rm -f $(asound_module_conf_LTLIBRARIES)
-	@list='$(asound_module_conf_LTLIBRARIES)'; for p in $$list; do \
-	  dir="`echo $$p | sed -e 's|/[^/]*$$||'`"; \
-	  test "$$dir" != "$$p" || dir=.; \
-	  echo "rm -f \"$${dir}/so_locations\""; \
-	  rm -f "$${dir}/so_locations"; \
-	done
 install-asound_module_ctlLTLIBRARIES: $(asound_module_ctl_LTLIBRARIES)
 	@$(NORMAL_INSTALL)
 	test -z "$(asound_module_ctldir)" || $(MKDIR_P) "$(DESTDIR)$(asound_module_ctldir)"
@@ -365,8 +322,6 @@ clean-asound_module_pcmLTLIBRARIES:
 	  echo "rm -f \"$${dir}/so_locations\""; \
 	  rm -f "$${dir}/so_locations"; \
 	done
-libasound_module_conf_none.la: $(libasound_module_conf_none_la_OBJECTS) $(libasound_module_conf_none_la_DEPENDENCIES) 
-	$(LINK) -rpath $(asound_module_confdir) $(libasound_module_conf_none_la_OBJECTS) $(libasound_module_conf_none_la_LIBADD) $(LIBS)
 libasound_module_ctl_none.la: $(libasound_module_ctl_none_la_OBJECTS) $(libasound_module_ctl_none_la_DEPENDENCIES) 
 	$(LINK) -rpath $(asound_module_ctldir) $(libasound_module_ctl_none_la_OBJECTS) $(libasound_module_ctl_none_la_LIBADD) $(LIBS)
 libasound_module_pcm_none.la: $(libasound_module_pcm_none_la_OBJECTS) $(libasound_module_pcm_none_la_DEPENDENCIES) 
@@ -378,7 +333,6 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/conf_none.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ctl_none.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/pcm_none.Plo@am__quote@
 
@@ -495,7 +449,7 @@ check-am: all-am
 check: check-am
 all-am: Makefile $(LTLIBRARIES)
 installdirs:
-	for dir in "$(DESTDIR)$(asound_module_confdir)" "$(DESTDIR)$(asound_module_ctldir)" "$(DESTDIR)$(asound_module_pcmdir)"; do \
+	for dir in "$(DESTDIR)$(asound_module_ctldir)" "$(DESTDIR)$(asound_module_pcmdir)"; do \
 	  test -z "$$dir" || $(MKDIR_P) "$$dir"; \
 	done
 install: install-am
@@ -525,8 +479,7 @@ maintainer-clean-generic:
 	@echo "it deletes files that may require special tools to rebuild."
 clean: clean-am
 
-clean-am: clean-asound_module_confLTLIBRARIES \
-	clean-asound_module_ctlLTLIBRARIES \
+clean-am: clean-asound_module_ctlLTLIBRARIES \
 	clean-asound_module_pcmLTLIBRARIES clean-generic clean-libtool \
 	mostlyclean-am
 
@@ -548,8 +501,7 @@ info: info-am
 
 info-am:
 
-install-data-am: install-asound_module_confLTLIBRARIES \
-	install-asound_module_ctlLTLIBRARIES \
+install-data-am: install-asound_module_ctlLTLIBRARIES \
 	install-asound_module_pcmLTLIBRARIES
 
 install-dvi: install-dvi-am
@@ -596,20 +548,17 @@ ps: ps-am
 
 ps-am:
 
-uninstall-am: uninstall-asound_module_confLTLIBRARIES \
-	uninstall-asound_module_ctlLTLIBRARIES \
+uninstall-am: uninstall-asound_module_ctlLTLIBRARIES \
 	uninstall-asound_module_pcmLTLIBRARIES
 
 .MAKE: install-am install-strip
 
 .PHONY: CTAGS GTAGS all all-am check check-am clean \
-	clean-asound_module_confLTLIBRARIES \
 	clean-asound_module_ctlLTLIBRARIES \
 	clean-asound_module_pcmLTLIBRARIES clean-generic clean-libtool \
 	ctags distclean distclean-compile distclean-generic \
 	distclean-libtool distclean-tags distdir dvi dvi-am html \
 	html-am info info-am install install-am \
-	install-asound_module_confLTLIBRARIES \
 	install-asound_module_ctlLTLIBRARIES \
 	install-asound_module_pcmLTLIBRARIES install-data \
 	install-data-am install-dvi install-dvi-am install-exec \
@@ -620,7 +569,6 @@ uninstall-am: uninstall-asound_module_confLTLIBRARIES \
 	maintainer-clean-generic mostlyclean mostlyclean-compile \
 	mostlyclean-generic mostlyclean-libtool pdf pdf-am ps ps-am \
 	tags uninstall uninstall-am \
-	uninstall-asound_module_confLTLIBRARIES \
 	uninstall-asound_module_ctlLTLIBRARIES \
 	uninstall-asound_module_pcmLTLIBRARIES
 

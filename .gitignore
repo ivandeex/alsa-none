@@ -1,0 +1,14 @@
+
+# /
+/config.log
+/config.status
+/stamp-h1
+/config.h
+/libtool
+/Makefile
+/none/.deps
+/none/Makefile
+
+# /src/
+/src/.deps
+/src/Makefile

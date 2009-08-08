@@ -747,7 +747,7 @@ PACKAGE_VERSION=
 PACKAGE_STRING=
 PACKAGE_BUGREPORT=
 
-ac_unique_file="none/pcm_none.c"
+ac_unique_file="src/pcm_none.c"
 ac_default_prefix=/usr
 # Factoring default headers for most tests.
 ac_includes_default="\
@@ -790,8 +790,6 @@ am__EXEEXT_TRUE
 LTLIBOBJS
 LIBOBJS
 ALSA_PLUGIN_DIR
-HAVE_NULL_FALSE
-HAVE_NULL_TRUE
 ALSA_LIBS
 ALSA_CFLAGS
 PKG_CONFIG
@@ -910,7 +908,6 @@ with_pic
 enable_fast_install
 with_gnu_ld
 enable_libtool_lock
-enable_none
 with_plugindir
 '
       ac_precious_vars='build_alias
@@ -1560,7 +1557,6 @@ Optional Features:
   --enable-fast-install[=PKGS]
                           optimize for fast installation [default=yes]
   --disable-libtool-lock  avoid locking (might break parallel builds)
-  --disable-none          Disable building of none plugin
 
 Optional Packages:
   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
@@ -4497,13 +4493,13 @@ if test "${lt_cv_nm_interface+set}" = set; then
 else
   lt_cv_nm_interface="BSD nm"
   echo "int some_variable = 0;" > conftest.$ac_ext
-  (eval echo "\"\$as_me:4500: $ac_compile\"" >&5)
+  (eval echo "\"\$as_me:4496: $ac_compile\"" >&5)
   (eval "$ac_compile" 2>conftest.err)
   cat conftest.err >&5
-  (eval echo "\"\$as_me:4503: $NM \\\"conftest.$ac_objext\\\"\"" >&5)
+  (eval echo "\"\$as_me:4499: $NM \\\"conftest.$ac_objext\\\"\"" >&5)
   (eval "$NM \"conftest.$ac_objext\"" 2>conftest.err > conftest.out)
   cat conftest.err >&5
-  (eval echo "\"\$as_me:4506: output\"" >&5)
+  (eval echo "\"\$as_me:4502: output\"" >&5)
   cat conftest.out >&5
   if $GREP 'External.*some_variable' conftest.out > /dev/null; then
     lt_cv_nm_interface="MS dumpbin"
@@ -5709,7 +5705,7 @@ ia64-*-hpux*)
   ;;
 *-*-irix6*)
   # Find out which ABI we are using.
-  echo '#line 5712 "configure"' > conftest.$ac_ext
+  echo '#line 5708 "configure"' > conftest.$ac_ext
   if { (eval echo "$as_me:$LINENO: \"$ac_compile\"") >&5
   (eval $ac_compile) 2>&5
   ac_status=$?
@@ -7536,11 +7532,11 @@ else
    -e 's:.*FLAGS}\{0,1\} :&$lt_compiler_flag :; t' \
    -e 's: [^ ]*conftest\.: $lt_compiler_flag&:; t' \
    -e 's:$: $lt_compiler_flag:'`
-   (eval echo "\"\$as_me:7539: $lt_compile\"" >&5)
+   (eval echo "\"\$as_me:7535: $lt_compile\"" >&5)
    (eval "$lt_compile" 2>conftest.err)
    ac_status=$?
    cat conftest.err >&5
-   echo "$as_me:7543: \$? = $ac_status" >&5
+   echo "$as_me:7539: \$? = $ac_status" >&5
    if (exit $ac_status) && test -s "$ac_outfile"; then
      # The compiler can only warn and ignore the option if not recognized
      # So say no if there are warnings other than the usual output.
@@ -7875,11 +7871,11 @@ else
    -e 's:.*FLAGS}\{0,1\} :&$lt_compiler_flag :; t' \
    -e 's: [^ ]*conftest\.: $lt_compiler_flag&:; t' \
    -e 's:$: $lt_compiler_flag:'`
-   (eval echo "\"\$as_me:7878: $lt_compile\"" >&5)
+   (eval echo "\"\$as_me:7874: $lt_compile\"" >&5)
    (eval "$lt_compile" 2>conftest.err)
    ac_status=$?
    cat conftest.err >&5
-   echo "$as_me:7882: \$? = $ac_status" >&5
+   echo "$as_me:7878: \$? = $ac_status" >&5
    if (exit $ac_status) && test -s "$ac_outfile"; then
      # The compiler can only warn and ignore the option if not recognized
      # So say no if there are warnings other than the usual output.
@@ -7980,11 +7976,11 @@ else
    -e 's:.*FLAGS}\{0,1\} :&$lt_compiler_flag :; t' \
    -e 's: [^ ]*conftest\.: $lt_compiler_flag&:; t' \
    -e 's:$: $lt_compiler_flag:'`
-   (eval echo "\"\$as_me:7983: $lt_compile\"" >&5)
+   (eval echo "\"\$as_me:7979: $lt_compile\"" >&5)
    (eval "$lt_compile" 2>out/conftest.err)
    ac_status=$?
    cat out/conftest.err >&5
-   echo "$as_me:7987: \$? = $ac_status" >&5
+   echo "$as_me:7983: \$? = $ac_status" >&5
    if (exit $ac_status) && test -s out/conftest2.$ac_objext
    then
      # The compiler can only warn and ignore the option if not recognized
@@ -8035,11 +8031,11 @@ else
    -e 's:.*FLAGS}\{0,1\} :&$lt_compiler_flag :; t' \
    -e 's: [^ ]*conftest\.: $lt_compiler_flag&:; t' \
    -e 's:$: $lt_compiler_flag:'`
-   (eval echo "\"\$as_me:8038: $lt_compile\"" >&5)
+   (eval echo "\"\$as_me:8034: $lt_compile\"" >&5)
    (eval "$lt_compile" 2>out/conftest.err)
    ac_status=$?
    cat out/conftest.err >&5
-   echo "$as_me:8042: \$? = $ac_status" >&5
+   echo "$as_me:8038: \$? = $ac_status" >&5
    if (exit $ac_status) && test -s out/conftest2.$ac_objext
    then
      # The compiler can only warn and ignore the option if not recognized
@@ -10838,7 +10834,7 @@ else
   lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
   lt_status=$lt_dlunknown
   cat > conftest.$ac_ext <<_LT_EOF
-#line 10841 "configure"
+#line 10837 "configure"
 #include "confdefs.h"
 
 #if HAVE_DLFCN_H
@@ -10934,7 +10930,7 @@ else
   lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
   lt_status=$lt_dlunknown
   cat > conftest.$ac_ext <<_LT_EOF
-#line 10937 "configure"
+#line 10933 "configure"
 #include "confdefs.h"
 
 #if HAVE_DLFCN_H
@@ -11716,21 +11712,6 @@ $as_echo "$as_me: error: *** libasound has no external plugin SDK" >&2;}
 fi
 
 
-# Check whether --enable-none was given.
-if test "${enable_none+set}" = set; then
-  enableval=$enable_none;
-fi
-
-
- if test x$HAVE_NULL = xyes; then
-  HAVE_NULL_TRUE=
-  HAVE_NULL_FALSE='#'
-else
-  HAVE_NULL_TRUE='#'
-  HAVE_NULL_FALSE=
-fi
-
-
 test "x$prefix" = xNONE && prefix=$ac_default_prefix
 test "x$exec_prefix" = xNONE && exec_prefix=$prefix
 
@@ -11767,7 +11748,7 @@ echo $VERSION > $srcdir/version
 $as_echo "$SND_PLUGINS_VERSION" >&6; }
 
 
-ac_config_files="$ac_config_files Makefile none/Makefile"
+ac_config_files="$ac_config_files Makefile src/Makefile"
 
 cat >confcache <<\_ACEOF
 # This file is a shell script that caches the results of configure
@@ -11885,13 +11866,6 @@ if test -z "${am__fastdepCC_TRUE}" && test -z "${am__fastdepCC_FALSE}"; then
   { { $as_echo "$as_me:$LINENO: error: conditional \"am__fastdepCC\" was never defined.
 Usually this means the macro was only invoked conditionally." >&5
 $as_echo "$as_me: error: conditional \"am__fastdepCC\" was never defined.
-Usually this means the macro was only invoked conditionally." >&2;}
-   { (exit 1); exit 1; }; }
-fi
-if test -z "${HAVE_NULL_TRUE}" && test -z "${HAVE_NULL_FALSE}"; then
-  { { $as_echo "$as_me:$LINENO: error: conditional \"HAVE_NULL\" was never defined.
-Usually this means the macro was only invoked conditionally." >&5
-$as_echo "$as_me: error: conditional \"HAVE_NULL\" was never defined.
 Usually this means the macro was only invoked conditionally." >&2;}
    { (exit 1); exit 1; }; }
 fi
@@ -12662,7 +12636,7 @@ do
     "depfiles") CONFIG_COMMANDS="$CONFIG_COMMANDS depfiles" ;;
     "libtool") CONFIG_COMMANDS="$CONFIG_COMMANDS libtool" ;;
     "Makefile") CONFIG_FILES="$CONFIG_FILES Makefile" ;;
-    "none/Makefile") CONFIG_FILES="$CONFIG_FILES none/Makefile" ;;
+    "src/Makefile") CONFIG_FILES="$CONFIG_FILES src/Makefile" ;;
 
   *) { { $as_echo "$as_me:$LINENO: error: invalid argument: $ac_config_target" >&5
 $as_echo "$as_me: error: invalid argument: $ac_config_target" >&2;}
@@ -14134,8 +14108,6 @@ echo
 echo "Plugin directory: $ALSA_PLUGIN_DIR"
 echo "ALSA_CFLAGS: $ALSA_CFLAGS"
 echo "ALSA_LIBS: $ALSA_LIBS"
-echo "Null plugin:  $HAVE_NULL"
-if test "$HAVE_NULL" = "yes"; then
-  echo "  none_CFLAGS: $none_CFLAGS"
-  echo "  none_LIBS: $none_LIBS"
-fi
+echo "none_CFLAGS: $none_CFLAGS"
+echo "none_LIBS: $none_LIBS"
+

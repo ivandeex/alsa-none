@@ -1,4 +1,4 @@
-SUBDIRS = none
+SUBDIRS = src
 
 EXTRA_DIST = 
 AUTOMAKE_OPTIONS = foreign
